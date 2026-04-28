@@ -1,11 +1,11 @@
 const stylesheet = `
 
 .react-jinke-music-player-main .music-player-panel .panel-content .rc-slider-handle {
-  background: #c231ab
+  background: #ffffffff
 }
 .react-jinke-music-player-main .music-player-panel .panel-content .rc-slider-track,
 .react-jinke-music-player-mobile-progress .rc-slider-track {
-  background: linear-gradient(to left, #c231ab, #380eff)
+  background: linear-gradient(to left, #ffffffff, #151515ff)
 }
 
 .react-jinke-music-player-mobile {
@@ -13,18 +13,18 @@ const stylesheet = `
 }
 
 .react-jinke-music-player-mobile-progress .rc-slider-handle {
-  background: #c231ab;
+  background: #ffffffff;
   height: 20px;
   width: 20px;
   margin-top: -9px;
 }
 
 .react-jinke-music-player-main ::-webkit-scrollbar-thumb {
-  background-color: #c231ab;
+  background-color: #ffffffff;
 }
 
 .react-jinke-music-player-pause-icon {
-  background-color: #c231ab;
+  background-color: #ffffffff;
   border-radius: 50%;
   outline: auto;
   color: white;
@@ -38,23 +38,23 @@ const stylesheet = `
   color: white;
 }
 .react-jinke-music-player-main .music-player-panel .panel-content .player-content .play-btn svg:hover  {
-  background-color: #c231ab;
+  background-color: #ffffffff;
   border-radius: 50%;
   outline: auto;
   color: white;
 }
 
 .react-jinke-music-player-main svg:hover {
-  color: #c231ab;
+  color: #ffffffff;
 }
 
 .react-jinke-music-player .music-player-controller {
-  color: #c231ab;
-  border: 1px solid #e14ac2;
+  color: #484848ff;
+  border: 1px solid #000000ff;
 }
 
 .react-jinke-music-player .music-player-controller.music-player-playing:before {
-  border: 1px solid rgba(194, 49, 171, 0.3);
+  border: 1px solid rgba(165, 165, 165, 0.3);
 }
 
 .react-jinke-music-player .music-player .destroy-btn {
@@ -96,12 +96,12 @@ const stylesheet = `
 }
 
 a[aria-current="page"] {
-  color: #c231ab !important;
+  color: #ffffffff !important;
   font-weight: bold;
 }
 
 a[aria-current="page"] .MuiListItemIcon-root {
-  color: #c231ab !important;
+  color: #ffffffff !important;
 }
 
 .panel-content {

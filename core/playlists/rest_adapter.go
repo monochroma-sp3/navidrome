@@ -3,11 +3,9 @@ package playlists
 import (
 	"context"
 	"errors"
-	"reflect"
 
 	"github.com/deluan/rest"
 	"github.com/navidrome/navidrome/model"
-	"github.com/navidrome/navidrome/model/criteria"
 	"github.com/navidrome/navidrome/model/request"
 )
 
@@ -34,8 +32,8 @@ func (r *playlistRepositoryWrapper) Save(entity any) (string, error) {
 	return r.service.savePlaylist(r.ctx, entity.(*model.Playlist))
 }
 
-func (r *playlistRepositoryWrapper) Update(id string, entity any, _ ...string) error {
-	return r.service.updatePlaylistEntity(r.ctx, id, entity.(*model.Playlist))
+func (r *playlistRepositoryWrapper) Update(id string, entity any, cols ...string) error {
+	return r.service.updatePlaylistEntity(r.ctx, id, entity.(*model.Playlist), cols...)
 }
 
 func (r *playlistRepositoryWrapper) Delete(id string) error {
@@ -79,7 +77,7 @@ func (s *playlists) savePlaylist(ctx context.Context, pls *model.Playlist) (stri
 
 // updatePlaylistEntity updates playlist metadata with permission checks.
 // Used by the REST API wrapper.
-func (s *playlists) updatePlaylistEntity(ctx context.Context, id string, entity *model.Playlist) error {
+func (s *playlists) updatePlaylistEntity(ctx context.Context, id string, entity *model.Playlist, cols ...string) error {
 	current, err := s.checkWritable(ctx, id)
 	if err != nil {
 		switch {
@@ -95,45 +93,11 @@ func (s *playlists) updatePlaylistEntity(ctx context.Context, id string, entity 
 	if !usr.IsAdmin && entity.OwnerID != "" && entity.OwnerID != current.OwnerID {
 		return rest.ErrPermissionDenied
 	}
-
-	contentChanged := entity.Name != current.Name ||
-		entity.Comment != current.Comment ||
-		(entity.OwnerID != "" && entity.OwnerID != current.OwnerID) ||
-		!rulesEqual(current.Rules, entity.Rules)
-
-	if contentChanged {
-		if entity.OwnerID != "" {
-			current.OwnerID = entity.OwnerID
-		}
-		current.Rules = entity.Rules
-		if current.Path != "" && current.Sync != entity.Sync {
-			current.Sync = entity.Sync
-		}
-		return s.updateMetadata(ctx, s.ds, current, &entity.Name, &entity.Comment, &entity.Public)
+	// Apply ownership change (admin only)
+	if entity.OwnerID != "" {
+		current.OwnerID = entity.OwnerID
 	}
-
-	// Only sync/public changed — skip updatedAt so cover art URLs stay stable
-	var cols []string
-	if current.Path != "" && current.Sync != entity.Sync {
-		current.Sync = entity.Sync
-		cols = append(cols, "sync")
-	}
-	if current.Public != entity.Public {
-		current.Public = entity.Public
-		cols = append(cols, "public")
-	}
-	if len(cols) == 0 {
-		return nil
-	}
-	return s.ds.Playlist(ctx).Put(current, cols...)
-}
-
-func rulesEqual(a, b *criteria.Criteria) bool {
-	if a == b {
-		return true
-	}
-	if a == nil || b == nil {
-		return false
-	}
-	return reflect.DeepEqual(a, b)
+	// Apply smart playlist rules update
+	current.Rules = entity.Rules
+	return s.updateMetadata(ctx, s.ds, current, &entity.Name, &entity.Comment, &entity.Public)
 }

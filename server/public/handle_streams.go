@@ -4,13 +4,11 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
-	"time"
 
 	"github.com/navidrome/navidrome/core/auth"
 	"github.com/navidrome/navidrome/core/stream"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
-	. "github.com/navidrome/navidrome/utils/gg"
 	"github.com/navidrome/navidrome/utils/req"
 )
 
@@ -23,18 +21,6 @@ func (pub *Router) handleStream(w http.ResponseWriter, r *http.Request) {
 		log.Error(ctx, "Error parsing shared stream info", err)
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
-	}
-
-	if info.shareID != "" {
-		share, err := pub.ds.Share(ctx).Get(info.shareID)
-		if err != nil {
-			checkShareError(ctx, w, err, info.shareID)
-			return
-		}
-		if expiresAt := V(share.ExpiresAt); !expiresAt.IsZero() && expiresAt.Before(time.Now()) {
-			checkShareError(ctx, w, model.ErrExpired, info.shareID)
-			return
-		}
 	}
 
 	mf, err := pub.ds.MediaFile(ctx).Get(info.id)
@@ -77,14 +63,17 @@ type shareTrackInfo struct {
 	id      string
 	format  string
 	bitrate int
-	shareID string
 }
 
 func decodeStreamInfo(tokenString string) (shareTrackInfo, error) {
-	c, err := auth.Validate(tokenString)
+	token, err := auth.TokenAuth.Decode(tokenString)
 	if err != nil {
 		return shareTrackInfo{}, err
 	}
+	if token == nil {
+		return shareTrackInfo{}, errors.New("unauthorized")
+	}
+	c := auth.ClaimsFromToken(token)
 	if c.ID == "" {
 		return shareTrackInfo{}, errors.New("required claim \"id\" not found")
 	}
@@ -92,6 +81,5 @@ func decodeStreamInfo(tokenString string) (shareTrackInfo, error) {
 		id:      c.ID,
 		format:  c.Format,
 		bitrate: c.BitRate,
-		shareID: c.ShareID,
 	}, nil
 }

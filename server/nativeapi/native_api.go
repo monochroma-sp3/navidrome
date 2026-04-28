@@ -65,9 +65,12 @@ func (api *Router) routes() http.Handler {
 		r.Use(server.JWTRefresher)
 		r.Use(server.UpdateLastAccessMiddleware(api.ds))
 		api.RX(r, "/user", api.users.NewRepository, true)
-		api.R(r, "/song", model.MediaFile{}, false)
-		api.R(r, "/album", model.Album{}, false)
-		api.addArtistRoute(r)
+		r.Group(func(r chi.Router) {
+			r.Use(api.tidalJITMiddleware)
+			api.R(r, "/song", model.MediaFile{}, false)
+			api.R(r, "/album", model.Album{}, false)
+			api.addArtistRoute(r)
+		})
 		api.R(r, "/genre", model.Genre{}, false)
 		api.R(r, "/player", model.Player{}, true)
 		api.R(r, "/transcoding", model.Transcoding{}, conf.Server.EnableTranscodingConfig)
@@ -84,6 +87,7 @@ func (api *Router) routes() http.Handler {
 		api.addMissingFilesRoute(r)
 		api.addKeepAliveRoute(r)
 		api.addInsightsRoute(r)
+		api.addTidalRoutes(r)
 
 		r.With(adminOnlyMiddleware).Group(func(r chi.Router) {
 			api.addInspectRoute(r)

@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sort"
 	"strings"
 	"time"
 
 	. "github.com/Masterminds/squirrel"
 	"github.com/deluan/sanitize"
+	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/core/publicurl"
+	"github.com/navidrome/navidrome/core/tidal"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/server/subsonic/responses"
@@ -66,15 +69,47 @@ func (api *Router) searchAll(ctx context.Context, sp *searchParams, musicFolderI
 	start := time.Now()
 	q := sanitize.Accents(strings.ToLower(strings.TrimSuffix(sp.query, "*")))
 
+	var tidalLibID int
+	if conf.Server.Tidal.Enabled {
+		// Resolve the Tidal library ID once and pass it into SyncSearch so
+		// the JIT sync doesn't re-query the libraries table itself.
+		if id, err := tidal.GetOrCreateTidalLibrary(ctx, api.ds); err == nil {
+			tidalLibID = id
+		}
+		client := tidal.NewClient()
+		limit := sp.songCount
+		if limit < 20 {
+			limit = 20
+		}
+		if err := tidal.SyncSearchWithLibrary(ctx, api.ds, client, q, limit, tidalLibID); err != nil {
+			log.Error(ctx, "Failed to JIT sync Tidal", "query", q, err)
+		}
+	}
+
 	// Build options with offset/size/filters packed in
 	songOpts := model.QueryOptions{Max: sp.songCount, Offset: sp.songOffset}
 	albumOpts := model.QueryOptions{Max: sp.albumCount, Offset: sp.albumOffset}
 	artistOpts := model.QueryOptions{Max: sp.artistCount, Offset: sp.artistOffset}
 
 	if len(musicFolderIds) > 0 {
-		songOpts.Filters = Eq{"library_id": musicFolderIds}
-		albumOpts.Filters = Eq{"library_id": musicFolderIds}
-		artistOpts.Filters = Eq{"library_artist.library_id": musicFolderIds}
+		libIDs := musicFolderIds
+		// Always include the Tidal library so Subsonic clients that pass only their
+		// local library's ID still see Tidal results alongside local ones.
+		if tidalLibID != 0 {
+			found := false
+			for _, id := range libIDs {
+				if id == tidalLibID {
+					found = true
+					break
+				}
+			}
+			if !found {
+				libIDs = append(libIDs, tidalLibID)
+			}
+		}
+		songOpts.Filters = Eq{"library_id": libIDs}
+		albumOpts.Filters = Eq{"library_id": libIDs}
+		artistOpts.Filters = Eq{"library_artist.library_id": libIDs}
 	}
 
 	// Run searches in parallel
@@ -89,7 +124,44 @@ func (api *Router) searchAll(ctx context.Context, sp *searchParams, musicFolderI
 	} else {
 		log.Warn(ctx, "Search was interrupted", "query", sp.query, "elapsedTime", time.Since(start), err)
 	}
+
+	if conf.Server.Tidal.Enabled && len(mediaFiles) > 1 {
+		mediaFiles = rerankTidalByPopularity(mediaFiles)
+	}
+
 	return mediaFiles, albums, artists
+}
+
+// rerankTidalByPopularity preserves the relative order of local tracks
+// (BM25 ranking, user-owned files come first) and moves Tidal tracks after
+// them sorted by cached Tidal popularity DESC. Returning only what the
+// caller passed in keeps pagination counts correct.
+//
+// Tidal's /search/tracks already returns by popularity, but the FTS5 BM25
+// re-rank loses that order; this restores it using the in-memory cache
+// populated by SyncSearch, without any DB schema change.
+func rerankTidalByPopularity(mfs model.MediaFiles) model.MediaFiles {
+	local := mfs[:0:0]
+	tidalHits := make(model.MediaFiles, 0, len(mfs))
+	for _, mf := range mfs {
+		if mf.ExternalSource == tidal.ExternalSourceTidal {
+			tidalHits = append(tidalHits, mf)
+		} else {
+			local = append(local, mf)
+		}
+	}
+	if len(tidalHits) == 0 {
+		return mfs
+	}
+	sort.SliceStable(tidalHits, func(i, j int) bool {
+		pi, _ := tidal.LookupPopularity(tidalHits[i].ID)
+		pj, _ := tidal.LookupPopularity(tidalHits[j].ID)
+		return pi > pj
+	})
+	out := make(model.MediaFiles, 0, len(mfs))
+	out = append(out, local...)
+	out = append(out, tidalHits...)
+	return out
 }
 
 func (api *Router) Search2(r *http.Request) (*responses.Subsonic, error) {

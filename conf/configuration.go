@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"time"
@@ -27,7 +26,6 @@ type configOptions struct {
 	Address                         string
 	Port                            int
 	UnixSocketPerm                  string
-	EnforceNonRootUser              bool
 	MusicFolder                     string
 	DataFolder                      string
 	CacheFolder                     string
@@ -61,8 +59,8 @@ type configOptions struct {
 	SmartPlaylistRefreshDelay       time.Duration
 	AutoTranscodeDownload           bool
 	DefaultDownsamplingFormat       string
-	Search                          searchOptions  `json:",omitzero"`
-	Matcher                         matcherOptions `json:",omitzero"`
+	Search                          searchOptions `json:",omitzero"`
+	SimilarSongsMatchThreshold      int
 	RecentlyAddedByModTime          bool
 	PreferSortTags                  bool
 	IgnoredArticles                 string
@@ -113,6 +111,7 @@ type configOptions struct {
 	LastFM                          lastfmOptions       `json:",omitzero"`
 	Deezer                          deezerOptions       `json:",omitzero"`
 	ListenBrainz                    listenBrainzOptions `json:",omitzero"`
+	Tidal                           tidalOptions        `json:",omitzero"`
 	EnableScrobbleHistory           bool
 	Tags                            map[string]TagConf `json:",omitempty"`
 	Agents                          string
@@ -257,14 +256,16 @@ type extAuthOptions struct {
 	LogoutURL      string
 }
 
+type tidalOptions struct {
+	Enabled        bool
+	HifiApiURL     string
+	CountryCode    string
+	DefaultQuality string
+}
+
 type searchOptions struct {
 	Backend    string
 	FullString bool
-}
-
-type matcherOptions struct {
-	PreferStarred  bool
-	FuzzyThreshold int
 }
 
 // logFatal prints a fatal error message to stderr and exits.
@@ -272,12 +273,6 @@ type matcherOptions struct {
 var logFatal = func(args ...any) {
 	_, _ = fmt.Fprintln(os.Stderr, append([]any{"FATAL:"}, args...)...)
 	os.Exit(1)
-}
-
-var getEUID = os.Geteuid
-
-var currentGOOS = func() string {
-	return runtime.GOOS
 }
 
 var (
@@ -303,16 +298,10 @@ func Load(noConfigDump bool) {
 	mapDeprecatedOption("ReverseProxyUserHeader", "ExtAuth.UserHeader")
 	mapDeprecatedOption("HTTPSecurityHeaders.CustomFrameOptionsValue", "HTTPHeaders.FrameOptions")
 	mapDeprecatedOption("CoverJpegQuality", "CoverArtQuality")
-	mapDeprecatedOption("SimilarSongsMatchThreshold", "Matcher.FuzzyThreshold")
 
 	err := viper.Unmarshal(&Server)
 	if err != nil {
 		logFatal("Error parsing config:", err)
-	}
-
-	// Validate non-root user early, before any filesystem operations
-	if err := validateEnforceNonRootUser(); err != nil {
-		logFatal(err)
 	}
 
 	err = os.MkdirAll(Server.DataFolder, os.ModePerm)
@@ -442,7 +431,6 @@ func Load(noConfigDump bool) {
 	logDeprecatedOptions("ReverseProxyUserHeader", "ExtAuth.UserHeader")
 	logDeprecatedOptions("HTTPSecurityHeaders.CustomFrameOptionsValue", "HTTPHeaders.FrameOptions")
 	logDeprecatedOptions("CoverJpegQuality", "CoverArtQuality")
-	logDeprecatedOptions("SimilarSongsMatchThreshold", "Matcher.FuzzyThreshold")
 
 	// Removed options
 	logRemovedOptions("Spotify.ID", "Spotify.Secret")
@@ -611,18 +599,6 @@ func validateMaxImageUploadSize() error {
 	return nil
 }
 
-func validateEnforceNonRootUser() error {
-	if !Server.EnforceNonRootUser || currentGOOS() == "windows" {
-		return nil
-	}
-
-	if getEUID() == 0 {
-		return fmt.Errorf("EnforceNonRootUser is enabled but Navidrome is running as root")
-	}
-
-	return nil
-}
-
 func validateScanSchedule() error {
 	if Server.Scanner.Schedule == "0" || Server.Scanner.Schedule == "" {
 		Server.Scanner.Schedule = ""
@@ -722,7 +698,6 @@ func setViperDefaults() {
 	viper.SetDefault("address", "0.0.0.0")
 	viper.SetDefault("port", 4533)
 	viper.SetDefault("unixsocketperm", "0660")
-	viper.SetDefault("enforcenonrootuser", false)
 	viper.SetDefault("sessiontimeout", consts.DefaultSessionTimeout)
 	viper.SetDefault("baseurl", "")
 	viper.SetDefault("tlscert", "")
@@ -748,8 +723,7 @@ func setViperDefaults() {
 	viper.SetDefault("defaultdownsamplingformat", consts.DefaultDownsamplingFormat)
 	viper.SetDefault("search.fullstring", false)
 	viper.SetDefault("search.backend", "fts")
-	viper.SetDefault("matcher.preferstarred", true)
-	viper.SetDefault("matcher.fuzzythreshold", 85)
+	viper.SetDefault("similarsongsmatchthreshold", 85)
 	viper.SetDefault("recentlyaddedbymodtime", false)
 	viper.SetDefault("prefersorttags", false)
 	viper.SetDefault("ignoredarticles", "The El La Los Las Le Les Os As O A")
@@ -768,7 +742,7 @@ func setViperDefaults() {
 	viper.SetDefault("enablefavourites", true)
 	viper.SetDefault("enablestarrating", true)
 	viper.SetDefault("enableuserediting", true)
-	viper.SetDefault("defaulttheme", "Dark")
+	viper.SetDefault("defaulttheme", "Monochroma")
 	viper.SetDefault("defaultlanguage", "")
 	viper.SetDefault("defaultuivolume", consts.DefaultUIVolume)
 	viper.SetDefault("uisearchdebouncems", consts.DefaultUISearchDebounceMs)
@@ -843,6 +817,10 @@ func setViperDefaults() {
 	viper.SetDefault("plugins.cachesize", "200MB")
 	viper.SetDefault("plugins.autoreload", false)
 	viper.SetDefault("plugins.loglevel", "")
+	viper.SetDefault("tidal.enabled", false)
+	viper.SetDefault("tidal.hifiapiurl", "http://localhost:8000")
+	viper.SetDefault("tidal.countrycode", "US")
+	viper.SetDefault("tidal.defaultquality", "HI_RES_LOSSLESS")
 
 	// DevFlags. These are used to enable/disable debugging and incomplete features
 	viper.SetDefault("devlogsourceline", false)
@@ -856,7 +834,7 @@ func setViperDefaults() {
 	viper.SetDefault("devuishowconfig", true)
 	viper.SetDefault("devneweventstream", true)
 	viper.SetDefault("devoffsetoptimize", 50000)
-	viper.SetDefault("devartworkmaxrequests", max(2, runtime.NumCPU()/2))
+	viper.SetDefault("devartworkmaxrequests", 0)
 	viper.SetDefault("devartworkthrottlebackloglimit", consts.RequestThrottleBacklogLimit)
 	viper.SetDefault("devartworkthrottlebacklogtimeout", consts.RequestThrottleBacklogTimeout)
 	viper.SetDefault("devartistinfotimetolive", consts.ArtistInfoTimeToLive)

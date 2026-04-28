@@ -145,6 +145,10 @@ func (w *watcher) Watch(ctx context.Context, lib *model.Library) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
+	if lib.Path == "tidal://virtual" {
+		return nil
+	}
+
 	// If Run() hasn't been called yet, mainCtx will be nil - skip watching
 	if w.mainCtx == nil {
 		log.Debug(ctx, "Watcher not started yet, skipping watch for library", "libraryID", lib.ID, "name", lib.Name)

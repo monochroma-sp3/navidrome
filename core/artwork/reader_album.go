@@ -7,13 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"path"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/Masterminds/squirrel"
 	"github.com/navidrome/navidrome/conf"
+	"github.com/navidrome/navidrome/core"
 	"github.com/navidrome/navidrome/core/external"
 	"github.com/navidrome/navidrome/core/ffmpeg"
 	"github.com/navidrome/navidrome/log"
@@ -23,12 +24,12 @@ import (
 
 type albumArtworkReader struct {
 	cacheKey
-	a         *artwork
-	provider  external.Provider
-	album     model.Album
-	updatedAt *time.Time
-	imgFiles  []string // library-relative, forward-slash, no leading slash
-	lib       libraryView
+	a          *artwork
+	provider   external.Provider
+	album      model.Album
+	updatedAt  *time.Time
+	imgFiles   []string
+	rootFolder string
 }
 
 func newAlbumArtworkReader(ctx context.Context, artwork *artwork, artID model.ArtworkID, provider external.Provider) (*albumArtworkReader, error) {
@@ -40,17 +41,13 @@ func newAlbumArtworkReader(ctx context.Context, artwork *artwork, artID model.Ar
 	if err != nil {
 		return nil, err
 	}
-	lib, err := loadLibraryView(ctx, artwork.ds, al.LibraryID)
-	if err != nil {
-		return nil, err
-	}
 	a := &albumArtworkReader{
-		a:         artwork,
-		provider:  provider,
-		album:     *al,
-		updatedAt: imagesUpdateAt,
-		imgFiles:  imgFiles,
-		lib:       lib,
+		a:          artwork,
+		provider:   provider,
+		album:      *al,
+		updatedAt:  imagesUpdateAt,
+		imgFiles:   imgFiles,
+		rootFolder: core.AbsolutePath(ctx, artwork.ds, al.LibraryID, ""),
 	}
 	a.cacheKey.artID = artID
 	if a.updatedAt != nil && a.updatedAt.After(al.UpdatedAt) {
@@ -85,19 +82,19 @@ func (a *albumArtworkReader) Reader(ctx context.Context) (io.ReadCloser, string,
 
 func (a *albumArtworkReader) fromCoverArtPriority(ctx context.Context, ffmpeg ffmpeg.FFmpeg, priority string) []sourceFunc {
 	var ff []sourceFunc
+	if a.album.ExternalSource == "tidal" && a.album.LargeImageUrl != "" {
+		ff = append(ff, fromTidalAlbum(ctx, a.album))
+	}
 	for pattern := range strings.SplitSeq(strings.ToLower(priority), ",") {
 		pattern = strings.TrimSpace(pattern)
 		switch {
 		case pattern == "embedded":
-			embedRel := a.album.EmbedArtPath
-			ff = append(ff,
-				fromTag(ctx, a.lib.FS, embedRel),
-				fromFFmpegTag(ctx, ffmpeg, a.lib.Abs(embedRel)),
-			)
+			embedArtPath := filepath.Join(a.rootFolder, a.album.EmbedArtPath)
+			ff = append(ff, fromTag(ctx, embedArtPath), fromFFmpegTag(ctx, ffmpeg, embedArtPath))
 		case pattern == "external":
 			ff = append(ff, fromAlbumExternalSource(ctx, a.album, a.provider))
 		case len(a.imgFiles) > 0:
-			ff = append(ff, fromExternalFile(ctx, a.lib.FS, a.imgFiles, pattern))
+			ff = append(ff, fromExternalFile(ctx, a.imgFiles, pattern))
 		}
 	}
 	return ff
@@ -138,13 +135,13 @@ func loadAlbumFoldersPaths(ctx context.Context, ds model.DataStore, albums ...mo
 	var imgFiles []string
 	var updatedAt time.Time
 	for _, f := range folders {
-		paths = append(paths, f.AbsolutePath())
+		path := f.AbsolutePath()
+		paths = append(paths, path)
 		if f.ImagesUpdatedAt.After(updatedAt) {
 			updatedAt = f.ImagesUpdatedAt
 		}
-		rel := strings.TrimPrefix(path.Join(f.Path, f.Name), "/")
 		for _, img := range f.ImageFiles {
-			imgFiles = append(imgFiles, path.Join(rel, img))
+			imgFiles = append(imgFiles, filepath.Join(path, img))
 		}
 	}
 
@@ -185,8 +182,8 @@ func compareImageFiles(a, b string) int {
 	b = strings.ToLower(b)
 
 	// Extract base filenames without extensions
-	baseA := strings.TrimSuffix(path.Base(a), path.Ext(a))
-	baseB := strings.TrimSuffix(path.Base(b), path.Ext(b))
+	baseA := strings.TrimSuffix(filepath.Base(a), filepath.Ext(a))
+	baseB := strings.TrimSuffix(filepath.Base(b), filepath.Ext(b))
 
 	// Compare base names first, then full paths if equal
 	return cmp.Or(

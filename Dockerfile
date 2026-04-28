@@ -54,31 +54,22 @@ RUN xx-verify --setup
 
 WORKDIR /workspace
 
-RUN --mount=type=bind,source=. \
-    --mount=type=cache,target=/root/.cache \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+COPY . .
+RUN go mod download
 
 ARG GIT_SHA
 ARG GIT_TAG
 
-RUN --mount=type=bind,source=. \
-    --mount=from=ui,source=/build,target=./ui/build,ro \
-    --mount=type=cache,target=/root/.cache \
-    --mount=type=cache,target=/go/pkg/mod <<EOT
-    set -e
-    xx-go --wrap
-    export CGO_ENABLED=1
-    # -latomic is required on 32-bit arm (arm/v6, arm/v7) so SQLite's 64-bit atomics resolve.
+COPY --from=ui /build ./ui/build
+RUN set -e && \
+    xx-go --wrap && \
+    export CGO_ENABLED=1 && \
     go build -tags=netgo,sqlite_fts5 -ldflags="-w -s \
         -linkmode=external -extldflags '-latomic' \
         -X github.com/navidrome/navidrome/consts.gitSha=${GIT_SHA} \
         -X github.com/navidrome/navidrome/consts.gitTag=${GIT_TAG}" \
-        -o /out/navidrome .
-    # Fail the build if the binary is accidentally statically linked: dlopen (and
-    # therefore native libwebp detection) only works with a dynamic interpreter.
-    file /out/navidrome | grep -q "dynamically linked" || { echo "ERROR: /out/navidrome is not dynamically linked"; file /out/navidrome; exit 1; }
-EOT
+        -o /out/navidrome . && \
+    if ! file /out/navidrome | grep -q "dynamically linked"; then echo "ERROR: /out/navidrome is not dynamically linked"; file /out/navidrome; exit 1; fi
 
 ########################################################################################################################
 ### Build Navidrome binary for standalone distribution (static glibc, cross-compiled)
@@ -95,41 +86,30 @@ ARG TARGETPLATFORM
 RUN xx-apt install -y binutils gcc g++ libc6-dev zlib1g-dev
 RUN xx-verify --setup
 
-RUN --mount=type=bind,source=. \
-    --mount=type=cache,target=/root/.cache \
-    --mount=type=cache,target=/go/pkg/mod \
-    go mod download
+COPY . .
+RUN go mod download
 
 ARG GIT_SHA
 ARG GIT_TAG
 
-RUN --mount=type=bind,source=. \
-    --mount=from=ui,source=/build,target=./ui/build,ro \
-    --mount=from=osxcross,src=/osxcross/SDK,target=/xx-sdk,ro \
-    --mount=type=cache,target=/root/.cache \
-    --mount=type=cache,target=/go/pkg/mod <<EOT
-
-    # Setup CGO cross-compilation environment
-    xx-go --wrap
-    export CGO_ENABLED=1
-    cat $(go env GOENV)
-
-    # Only Darwin (macOS) requires clang (default), Windows requires gcc, everything else can use any compiler.
-    # So let's use gcc for everything except Darwin.
-    if [ "$(xx-info os)" != "darwin" ]; then
-        export CC=$(xx-info)-gcc
-        export CXX=$(xx-info)-g++
-        export LD_EXTRA="-extldflags '-static -latomic'"
-    fi
-    if [ "$(xx-info os)" = "windows" ]; then
-        export EXT=".exe"
-    fi
-
+COPY --from=ui /build ./ui/build
+COPY --from=osxcross /osxcross/SDK /xx-sdk
+RUN \
+    xx-go --wrap && \
+    export CGO_ENABLED=1 && \
+    cat $(go env GOENV) && \
+    if [ "$(xx-info os)" != "darwin" ]; then \
+        export CC=$(xx-info)-gcc; \
+        export CXX=$(xx-info)-g++; \
+        export LD_EXTRA="-extldflags '-static -latomic'"; \
+    fi; \
+    if [ "$(xx-info os)" = "windows" ]; then \
+        export EXT=".exe"; \
+    fi && \
     go build -tags=netgo,sqlite_fts5 -ldflags="${LD_EXTRA} -w -s \
         -X github.com/navidrome/navidrome/consts.gitSha=${GIT_SHA} \
         -X github.com/navidrome/navidrome/consts.gitTag=${GIT_TAG}" \
         -o /out/navidrome${EXT} .
-EOT
 
 # Verify if the binary was built for the correct platform and it is statically linked
 RUN xx-verify --static /out/navidrome*
@@ -154,11 +134,12 @@ RUN apk add -U --no-cache ffmpeg mpv sqlite libwebp libwebpdemux libwebpmux && \
 # Copy navidrome binary (musl build for Docker, enables native libwebp)
 COPY --from=build-alpine /out/navidrome /app/
 
-VOLUME ["/data", "/music"]
+# VOLUME instruction removed for Railway compatibility
+RUN mkdir -p /data /music
 ENV ND_MUSICFOLDER=/music
 ENV ND_DATAFOLDER=/data
 ENV ND_CONFIGFILE=/data/navidrome.toml
-ENV ND_PORT=4533
+ENV ND_PORT=${PORT:-4533}
 ENV ND_ENABLEWEBPENCODING=true
 RUN touch /.nddockerenv
 
@@ -167,3 +148,4 @@ WORKDIR /app
 
 ENTRYPOINT ["/app/navidrome"]
 
+# FORCE NEW DOCKERFILE BUILD

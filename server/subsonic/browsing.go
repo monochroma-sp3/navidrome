@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/core/publicurl"
+	"github.com/navidrome/navidrome/core/tidal"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/server/subsonic/filter"
@@ -52,7 +54,9 @@ func (api *Router) getArtist(r *http.Request, libIds []int, ifModifiedSince time
 		}
 		if len(indexes) == 0 {
 			log.Debug(ctx, "No artists found in library", "libId", libIds)
-			return nil, 0, newError(responses.ErrorDataNotFound, "Library not found or empty")
+			if !conf.Server.Tidal.Enabled {
+				return nil, 0, newError(responses.ErrorDataNotFound, "Library not found or empty")
+			}
 		}
 	}
 
@@ -146,6 +150,14 @@ func (api *Router) GetMusicDirectory(r *http.Request) (*responses.Subsonic, erro
 	case *model.Artist:
 		dir, err = api.buildArtistDirectory(ctx, v)
 	case *model.Album:
+		if conf.Server.Tidal.Enabled && v.ExternalSource == "tidal" {
+			if tidalID, err := strconv.Atoi(v.ExternalID); err == nil {
+				client := tidal.NewClient()
+				if err := tidal.SyncAlbum(ctx, api.ds, client, tidalID); err != nil {
+					log.Error(ctx, "Failed to JIT sync Tidal album tracks", "id", id, err)
+				}
+			}
+		}
 		dir, err = api.buildAlbumDirectory(ctx, v)
 	default:
 		log.Error(r, "Requested ID of invalid type", "id", id, "entity", v)
@@ -199,6 +211,15 @@ func (api *Router) GetAlbum(r *http.Request) (*responses.Subsonic, error) {
 	if err != nil {
 		log.Error(ctx, "Error retrieving album", "id", id, err)
 		return nil, err
+	}
+
+	if conf.Server.Tidal.Enabled && album.ExternalSource == "tidal" {
+		if tidalID, err := strconv.Atoi(album.ExternalID); err == nil {
+			client := tidal.NewClient()
+			if err := tidal.SyncAlbum(ctx, api.ds, client, tidalID); err != nil {
+				log.Error(ctx, "Failed to JIT sync Tidal album tracks", "id", id, err)
+			}
+		}
 	}
 
 	mfs, err := api.ds.MediaFile(ctx).GetAll(filter.SongsByAlbum(id))

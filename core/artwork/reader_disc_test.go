@@ -74,27 +74,20 @@ var _ = Describe("Disc Artwork Reader", func() {
 			tmpDir = GinkgoT().TempDir()
 		})
 
-		// createFile creates the file on disk and returns its library-relative forward-slash path.
-		createFile := func(relPath string) string {
-			fullPath := filepath.Join(tmpDir, filepath.FromSlash(relPath))
+		createFile := func(path string) string {
+			fullPath := filepath.Join(tmpDir, filepath.FromSlash(path))
 			Expect(os.MkdirAll(filepath.Dir(fullPath), 0755)).To(Succeed())
 			Expect(os.WriteFile(fullPath, []byte("image data"), 0600)).To(Succeed())
-			return relPath
-		}
-
-		// removeFile removes a library-relative file from disk.
-		removeFile := func(relPath string) {
-			Expect(os.Remove(filepath.Join(tmpDir, filepath.FromSlash(relPath)))).To(Succeed())
+			return fullPath
 		}
 
 		It("matches file with disc number in single-folder album", func() {
 			f1 := createFile("album/disc1.jpg")
 			f2 := createFile("album/disc2.jpg")
 			reader := &discArtworkReader{
-				discNumber:     1,
-				imgFiles:       []string{f1, f2},
-				discFoldersRel: map[string]bool{"album": true},
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:  1,
+				imgFiles:    []string{f1, f2},
+				discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 			}
 
 			sf := reader.fromExternalFile(ctx, "disc*.*")
@@ -108,10 +101,9 @@ var _ = Describe("Disc Artwork Reader", func() {
 		It("matches file without number in single-folder album (shared disc art)", func() {
 			f1 := createFile("album/cover.png")
 			reader := &discArtworkReader{
-				discNumber:     1,
-				imgFiles:       []string{f1},
-				discFoldersRel: map[string]bool{"album": true},
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:  1,
+				imgFiles:    []string{f1},
+				discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 			}
 
 			sf := reader.fromExternalFile(ctx, "cover.*")
@@ -126,10 +118,9 @@ var _ = Describe("Disc Artwork Reader", func() {
 			f1 := createFile("album/shellac.png")
 			makeReader := func(discNum int) *discArtworkReader {
 				return &discArtworkReader{
-					discNumber:     discNum,
-					imgFiles:       []string{f1},
-					discFoldersRel: map[string]bool{"album": true},
-					lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+					discNumber:  discNum,
+					imgFiles:    []string{f1},
+					discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 				}
 			}
 
@@ -148,10 +139,9 @@ var _ = Describe("Disc Artwork Reader", func() {
 			f2 := createFile("album/disc1.jpg")
 			f3 := createFile("album/disc2.jpg")
 			reader := &discArtworkReader{
-				discNumber:     2,
-				imgFiles:       []string{f1, f2, f3},
-				discFoldersRel: map[string]bool{"album": true},
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:  2,
+				imgFiles:    []string{f1, f2, f3},
+				discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 			}
 
 			sf := reader.fromExternalFile(ctx, "disc*.*")
@@ -173,10 +163,9 @@ var _ = Describe("Disc Artwork Reader", func() {
 			f1 := createFile("album/cover.png")
 			f2 := createFile("album/disc1.jpg")
 			reader := &discArtworkReader{
-				discNumber:     1,
-				imgFiles:       []string{f1, f2},
-				discFoldersRel: map[string]bool{"album": true},
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:  1,
+				imgFiles:    []string{f1, f2},
+				discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 			}
 
 			ff := reader.fromDiscArtPriority(ctx, nil, "disc*.*, cover.*")
@@ -202,10 +191,9 @@ var _ = Describe("Disc Artwork Reader", func() {
 					createFile("album/disc2.jpg"),
 				}
 				reader := &discArtworkReader{
-					discNumber:     discNumber,
-					imgFiles:       files,
-					discFoldersRel: map[string]bool{"album": true},
-					lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+					discNumber:  discNumber,
+					imgFiles:    files,
+					discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 				}
 
 				sf := reader.fromExternalFile(ctx, "disc*.*")
@@ -222,13 +210,12 @@ var _ = Describe("Disc Artwork Reader", func() {
 		It("tries the next fallback candidate when the first one cannot be opened", func() {
 			f1 := createFile("album/cover.jpg")
 			f2 := createFile("album/cover.png")
-			// Remove f1 so Open will fail on it; f2 should still win.
-			removeFile(f1)
+			// Remove f1 so os.Open will fail on it; f2 should still win.
+			Expect(os.Remove(f1)).To(Succeed())
 			reader := &discArtworkReader{
-				discNumber:     1,
-				imgFiles:       []string{f1, f2},
-				discFoldersRel: map[string]bool{"album": true},
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:  1,
+				imgFiles:    []string{f1, f2},
+				discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 			}
 
 			sf := reader.fromExternalFile(ctx, "cover.*")
@@ -247,16 +234,15 @@ var _ = Describe("Disc Artwork Reader", func() {
 			// that first file is unreadable.
 			f1 := createFile("album/stale/cover.png")
 			f2 := createFile("album/cover.png")
-			removeFile(f1)
+			Expect(os.Remove(f1)).To(Succeed())
 			reader := &discArtworkReader{
 				discNumber: 1,
 				imgFiles:   []string{f1, f2},
-				discFoldersRel: map[string]bool{
-					"album":       true,
-					"album/stale": true,
+				discFolders: map[string]bool{
+					filepath.Join(tmpDir, "album"):       true,
+					filepath.Join(tmpDir, "album/stale"): true,
 				},
 				isMultiFolder: true,
-				lib:           libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
 			}
 
 			sf := reader.fromExternalFile(ctx, "cover.png")
@@ -274,10 +260,9 @@ var _ = Describe("Disc Artwork Reader", func() {
 					createFile("album/disc2.jpg"),
 				}
 				reader := &discArtworkReader{
-					discNumber:     discNumber,
-					imgFiles:       files,
-					discFoldersRel: map[string]bool{"album": true},
-					lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+					discNumber:  discNumber,
+					imgFiles:    files,
+					discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 				}
 
 				sf := reader.fromExternalFile(ctx, pattern)
@@ -297,11 +282,10 @@ var _ = Describe("Disc Artwork Reader", func() {
 			f1 := createFile("album/cd1/disc.jpg")
 			f2 := createFile("album/cd2/disc.jpg")
 			reader := &discArtworkReader{
-				discNumber:     1,
-				imgFiles:       []string{f1, f2},
-				discFoldersRel: map[string]bool{"album/cd1": true},
-				isMultiFolder:  true,
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:    1,
+				imgFiles:      []string{f1, f2},
+				discFolders:   map[string]bool{filepath.Join(tmpDir, "album", "cd1"): true},
+				isMultiFolder: true,
 			}
 
 			sf := reader.fromExternalFile(ctx, "disc*.*")
@@ -316,11 +300,10 @@ var _ = Describe("Disc Artwork Reader", func() {
 			// disc2.jpg in cd1 folder should match disc 2, not disc 1
 			f1 := createFile("album/cd1/disc2.jpg")
 			reader := &discArtworkReader{
-				discNumber:     2,
-				imgFiles:       []string{f1},
-				discFoldersRel: map[string]bool{"album/cd1": true},
-				isMultiFolder:  true,
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:    2,
+				imgFiles:      []string{f1},
+				discFolders:   map[string]bool{filepath.Join(tmpDir, "album", "cd1"): true},
+				isMultiFolder: true,
 			}
 
 			sf := reader.fromExternalFile(ctx, "disc*.*")
@@ -334,10 +317,9 @@ var _ = Describe("Disc Artwork Reader", func() {
 		It("does not match disc2.jpg when looking for disc 1", func() {
 			f1 := createFile("album/disc2.jpg")
 			reader := &discArtworkReader{
-				discNumber:     1,
-				imgFiles:       []string{f1},
-				discFoldersRel: map[string]bool{"album": true},
-				lib:            libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+				discNumber:  1,
+				imgFiles:    []string{f1},
+				discFolders: map[string]bool{filepath.Join(tmpDir, "album"): true},
 			}
 
 			sf := reader.fromExternalFile(ctx, "disc*.*")
@@ -357,11 +339,11 @@ var _ = Describe("Disc Artwork Reader", func() {
 			tmpDir = GinkgoT().TempDir()
 		})
 
-		createFile := func(relPath string) string {
-			fullPath := filepath.Join(tmpDir, filepath.FromSlash(relPath))
+		createFile := func(path string) string {
+			fullPath := filepath.Join(tmpDir, filepath.FromSlash(path))
 			Expect(os.MkdirAll(filepath.Dir(fullPath), 0755)).To(Succeed())
 			Expect(os.WriteFile(fullPath, []byte("image data"), 0600)).To(Succeed())
-			return relPath
+			return fullPath
 		}
 
 		It("matches image file whose stem equals the disc subtitle (case-insensitive)", func() {
@@ -369,7 +351,6 @@ var _ = Describe("Disc Artwork Reader", func() {
 			reader := &discArtworkReader{
 				discNumber: 1,
 				imgFiles:   []string{f1},
-				lib:        libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
 			}
 
 			sf := reader.fromDiscSubtitle(ctx, "The Blue Disc")
@@ -385,7 +366,6 @@ var _ = Describe("Disc Artwork Reader", func() {
 			reader := &discArtworkReader{
 				discNumber: 2,
 				imgFiles:   []string{f1},
-				lib:        libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
 			}
 
 			sf := reader.fromDiscSubtitle(ctx, "Bonus Tracks")
@@ -401,7 +381,6 @@ var _ = Describe("Disc Artwork Reader", func() {
 			reader := &discArtworkReader{
 				discNumber: 1,
 				imgFiles:   []string{f1},
-				lib:        libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
 			}
 
 			sf := reader.fromDiscSubtitle(ctx, "The Blue Disc")
@@ -415,7 +394,6 @@ var _ = Describe("Disc Artwork Reader", func() {
 			reader := &discArtworkReader{
 				discNumber: 1,
 				imgFiles:   []string{f1, f2},
-				lib:        libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
 			}
 
 			sf := reader.fromDiscSubtitle(ctx, "The Blue Disc")
@@ -429,24 +407,19 @@ var _ = Describe("Disc Artwork Reader", func() {
 
 	Describe("discArtworkReader", func() {
 		Describe("fromDiscArtPriority", func() {
-			var (
-				reader *discArtworkReader
-				tmpDir string
-			)
+			var reader *discArtworkReader
 
 			BeforeEach(func() {
-				tmpDir = GinkgoT().TempDir()
 				reader = &discArtworkReader{
-					discNumber:     2,
-					isMultiFolder:  true,
-					discFoldersRel: map[string]bool{"music/album/cd2": true},
+					discNumber:    2,
+					isMultiFolder: true,
+					discFolders:   map[string]bool{"/music/album/cd2": true},
 					imgFiles: []string{
-						"music/album/cd1/disc.jpg",
-						"music/album/cd2/disc.jpg",
-						"music/album/cd2/disc2.jpg",
+						"/music/album/cd1/disc.jpg",
+						"/music/album/cd2/disc.jpg",
+						"/music/album/cd2/disc2.jpg",
 					},
-					firstTrackRel: "music/album/cd2/track1.flac",
-					lib:           libraryView{FS: osDirFS{os.DirFS(tmpDir)}, absRoot: tmpDir},
+					firstTrackPath: "/music/album/cd2/track1.flac",
 				}
 			})
 

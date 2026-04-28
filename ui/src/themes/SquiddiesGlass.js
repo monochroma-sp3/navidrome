@@ -7,15 +7,15 @@ import stylesheet from './SquiddiesGlass.css.js'
  */
 const colors = {
   pink: {
-    100: '#fbe3f4',
-    200: '#f5b9e3',
-    300: '#ec7cd6',
-    400: '#e14ac2',
-    500: '#c231ab', // base
-    600: '#a31a92',
-    700: '#8b0f7e',
-    800: '#7a006d',
-    900: '#670066',
+    100: '#f4f4f4ff',
+    200: '#c9c9c9ff',
+    300: '#a5a5a5ff',
+    400: '#8c8c8cff',
+    500: '#7e7e7eff', // base
+    600: '#6e6e6eff',
+    700: '#454545ff',
+    800: '#393939ff',
+    900: '#202020ff',
   },
   gray: {
     50: '#c2c1c2',
@@ -26,9 +26,9 @@ const colors = {
     500: '#171717', // darkest
   },
   purple: {
-    400: '#524590',
-    500: '#4d3249',
-    600: '#6d1c5e',
+    400: '#52459007',
+    500: '#4d324925',
+    600: '#6d1c5e17',
   },
   black: '#000',
   white: '#fff',
@@ -87,9 +87,9 @@ const musicListActions = {
       display: 'none',
     },
     'button>span:first-child>span, button:not(:first-child)>span:first-child>svg':
-      {
-        color: colors.gray[100],
-      },
+    {
+      color: colors.gray[100],
+    },
   },
 }
 
@@ -529,9 +529,9 @@ export default {
             color: `${colors.black} !important`,
           },
           'button>span:first-child>span, button:not(:first-child)>span:first-child>svg':
-            {
-              color: colors.gray[100],
-            },
+          {
+            color: colors.gray[100],
+          },
         },
       },
       actionsContainer: {

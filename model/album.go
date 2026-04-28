@@ -63,6 +63,9 @@ type Album struct {
 	Tags         Tags         `structs:"tags" json:"tags,omitempty" hash:"ignore"`       // All imported tags for this album
 	Participants Participants `structs:"participants" json:"participants" hash:"ignore"` // All artists that participated in this album
 
+	ExternalSource string `structs:"external_source" json:"externalSource,omitempty" hash:"ignore"` // Source of external content (e.g. "tidal")
+	ExternalID     string `structs:"external_id" json:"externalId,omitempty" hash:"ignore"`         // ID in the external source
+
 	Missing    bool      `structs:"missing" json:"missing"`                      // If all file of the album ar missing
 	ImportedAt time.Time `structs:"imported_at" json:"importedAt" hash:"ignore"` // When this album was imported/updated
 	CreatedAt  time.Time `structs:"created_at" json:"createdAt"`                 // Oldest CreatedAt for all songs in this album

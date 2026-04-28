@@ -34,6 +34,9 @@ type Artist struct {
 	SimilarArtists        Artists    `structs:"similar_artists"  json:"-"`
 	ExternalInfoUpdatedAt *time.Time `structs:"external_info_updated_at" json:"externalInfoUpdatedAt,omitempty"`
 
+	ExternalSource string `structs:"external_source" json:"externalSource,omitempty"` // Source of external content (e.g. "tidal")
+	ExternalID     string `structs:"external_id" json:"externalId,omitempty"`         // ID in the external source
+
 	Missing bool `structs:"missing" json:"missing"`
 
 	UploadedImage string `structs:"uploaded_image" json:"uploadedImage,omitempty"`

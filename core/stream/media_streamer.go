@@ -14,6 +14,7 @@ import (
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/core/ffmpeg"
+	"github.com/navidrome/navidrome/core/tidal"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/request"
@@ -77,6 +78,32 @@ func (ms *mediaStreamer) NewStream(ctx context.Context, mf *model.MediaFile, req
 	filePath := mf.AbsolutePath()
 
 	if format == "raw" {
+		// Check if this is a Tidal track — stream from hifi-api instead of local file
+		if mf.ExternalSource == "tidal" && mf.ExternalID != "" {
+			log.Debug(ctx, "Streaming TIDAL track", "id", mf.ID, "externalID", mf.ExternalID,
+				"title", mf.Title, "artist", mf.Artist)
+			body, seeker, contentType, size, err := ms.streamTidal(ctx, mf)
+			if err != nil {
+				return nil, fmt.Errorf("streaming tidal track %s: %w", mf.ExternalID, err)
+			}
+			s.ReadCloser = body
+			// Seeker non-nil → direct FLAC/MP4 file on CDN; http.ServeContent
+			// handles Range requests properly, which iOS AVPlayer requires.
+			if seeker != nil {
+				s.Seeker = seeker
+				s.size = size
+			}
+			switch {
+			case contentType == "audio/flac":
+				s.format = "flac"
+			case contentType == "audio/mp4" || contentType == "audio/aac":
+				s.format = "mp4"
+			default:
+				s.format = mf.Suffix
+			}
+			return s, nil
+		}
+
 		log.Debug(ctx, "Streaming RAW file", "id", mf.ID, "path", filePath,
 			"requestBitrate", req.BitRate, "requestFormat", req.Format, "requestOffset", req.Offset,
 			"originalBitrate", mf.BitRate, "originalFormat", mf.Suffix,
@@ -88,6 +115,30 @@ func (ms *mediaStreamer) NewStream(ctx context.Context, mf *model.MediaFile, req
 		s.ReadCloser = f
 		s.Seeker = f
 		s.format = mf.Suffix
+		return s, nil
+	}
+
+	// Tidal tracks cannot be transcoded locally — stream raw from hifi-api
+	if mf.ExternalSource == "tidal" && mf.ExternalID != "" {
+		log.Debug(ctx, "Tidal track requested with transcoding, streaming raw instead",
+			"id", mf.ID, "externalID", mf.ExternalID, "requestedFormat", format)
+		body, seeker, contentType, size, err := ms.streamTidal(ctx, mf)
+		if err != nil {
+			return nil, fmt.Errorf("streaming tidal track %s: %w", mf.ExternalID, err)
+		}
+		s.ReadCloser = body
+		if seeker != nil {
+			s.Seeker = seeker
+			s.size = size
+		}
+		switch {
+		case contentType == "audio/flac":
+			s.format = "flac"
+		case contentType == "audio/mp4" || contentType == "audio/aac":
+			s.format = "mp4"
+		default:
+			s.format = mf.Suffix
+		}
 		return s, nil
 	}
 
@@ -125,6 +176,9 @@ type Stream struct {
 	mf      *model.MediaFile
 	bitRate int
 	format  string
+	// size is the exact byte size when known (e.g. Tidal CDN content-length),
+	// used for the Content-Length header on non-seekable responses. 0 = unknown.
+	size int64
 	io.ReadCloser
 	io.Seeker
 }
@@ -152,7 +206,12 @@ func (s *Stream) Serve(ctx context.Context, w http.ResponseWriter, r *http.Reque
 	w.Header().Set("Accept-Ranges", "none")
 	w.Header().Set("Content-Type", s.ContentType())
 
-	if req.Params(r).BoolOr("estimateContentLength", false) {
+	// Prefer the exact size when the upstream told us (e.g. Tidal CDN); fall
+	// back to the bitrate-based estimate when requested.
+	switch {
+	case s.size > 0:
+		w.Header().Set("Content-Length", strconv.FormatInt(s.size, 10))
+	case req.Params(r).BoolOr("estimateContentLength", false):
 		length := strconv.Itoa(s.EstimatedContentLength())
 		log.Trace(ctx, "Estimated content-length", "contentLength", length)
 		w.Header().Set("Content-Length", length)
@@ -254,4 +313,19 @@ func userName(ctx context.Context) string {
 	} else {
 		return user.UserName
 	}
+}
+
+// streamTidal fetches audio from the Tidal hifi-api proxy for a track marked as external.
+func (ms *mediaStreamer) streamTidal(ctx context.Context, mf *model.MediaFile) (io.ReadCloser, io.Seeker, string, int64, error) {
+	if !conf.Server.Tidal.Enabled {
+		return nil, nil, "", 0, fmt.Errorf("tidal integration is not enabled")
+	}
+
+	tidalID, err := strconv.Atoi(mf.ExternalID)
+	if err != nil {
+		return nil, nil, "", 0, fmt.Errorf("invalid tidal track ID %q: %w", mf.ExternalID, err)
+	}
+
+	client := tidal.NewClient()
+	return client.StreamAudio(ctx, tidalID, conf.Server.Tidal.DefaultQuality)
 }

@@ -312,7 +312,10 @@ func (r *mediaFileRepository) MarkMissing(missing bool, mfs ...*model.MediaFile)
 		upd := Update(r.tableName).
 			Set("missing", missing).
 			Set("updated_at", time.Now()).
-			Where(Eq{"id": chunk})
+			Where(And{
+				Eq{"id": chunk},
+				Eq{"external_source": ""},  // Don't mark external (e.g. Tidal) tracks as missing
+			})
 		c, err := r.executeSQL(upd)
 		if err != nil || c == 0 {
 			log.Error(r.ctx, "Error setting mediafile missing flag", "ids", chunk, err)
@@ -331,6 +334,7 @@ func (r *mediaFileRepository) MarkMissingByFolder(missing bool, folderIDs ...str
 			Where(And{
 				Eq{"folder_id": chunk},
 				Eq{"missing": !missing},
+				Eq{"external_source": ""},  // Don't mark external (e.g. Tidal) tracks as missing
 			})
 		c, err := r.executeSQL(upd)
 		if err != nil {

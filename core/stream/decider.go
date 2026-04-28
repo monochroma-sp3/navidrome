@@ -439,6 +439,12 @@ func (s *deciderService) applyCodecLimitations(ctx context.Context, sourceBitrat
 // the parsed result. Returns (nil, nil) when probing is skipped or data already exists
 // (in which case the caller should parse mf.ProbeData).
 func (s *deciderService) ensureProbed(ctx context.Context, mf *model.MediaFile) (*ffmpeg.AudioProbeResult, error) {
+	// External-source tracks (Tidal, etc.) live behind virtual paths — ffprobe
+	// would try to stat a URL like tidal://track/X and fail. Rely on the
+	// metadata we already stored when syncing from the upstream API.
+	if mf.ExternalSource != "" {
+		return nil, nil
+	}
 	if mf.ProbeData != "" {
 		return nil, nil
 	}

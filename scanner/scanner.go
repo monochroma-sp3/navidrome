@@ -192,6 +192,10 @@ func (s *scannerImpl) prepareLibrariesForScan(ctx context.Context, state *scanSt
 	var successfulLibs []model.Library
 
 	for _, lib := range state.libraries {
+		if lib.Path == "tidal://virtual" {
+			continue
+		}
+
 		if lib.LastScanStartedAt.IsZero() {
 			// This is a new scan - mark it as started
 			err := s.ds.Library(ctx).ScanBegin(lib.ID, state.fullScan)

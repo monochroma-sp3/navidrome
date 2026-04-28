@@ -90,6 +90,9 @@ type MediaFile struct {
 	Tags         Tags         `structs:"tags" json:"tags,omitempty" hash:"ignore"`       // All imported tags from the original file
 	Participants Participants `structs:"participants" json:"participants" hash:"ignore"` // All artists that participated in this track
 
+	ExternalSource string `structs:"external_source" json:"externalSource,omitempty" hash:"ignore"` // Source of external content (e.g. "tidal")
+	ExternalID     string `structs:"external_id" json:"externalId,omitempty" hash:"ignore"`         // ID in the external source
+
 	Missing   bool      `structs:"missing" json:"missing" hash:"ignore"`      // If the file is not found in the library's FS
 	BirthTime time.Time `structs:"birth_time" json:"birthTime" hash:"ignore"` // Time of file creation (ctime)
 	CreatedAt time.Time `structs:"created_at" json:"createdAt" hash:"ignore"` // Time this entry was created in the DB

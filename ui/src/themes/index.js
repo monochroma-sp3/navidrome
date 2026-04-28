@@ -15,6 +15,7 @@ import NutballTheme from './nutball'
 import AmusicTheme from './amusic'
 import SquiddiesGlassTheme from './SquiddiesGlass'
 import NautilineTheme from './nautiline'
+import MonochromaTheme from './monochroma'
 
 export default {
   // Classic default themes
@@ -22,6 +23,7 @@ export default {
   DarkTheme,
 
   // New themes should be added here, in alphabetic order
+  MonochromaTheme,
   AmusicTheme,
   CatppuccinMacchiatoTheme,
   DraculaTheme,

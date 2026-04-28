@@ -5,9 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"net/url"
+	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
@@ -53,7 +53,7 @@ func (f sourceFunc) String() string {
 	return name
 }
 
-func fromExternalFile(ctx context.Context, libFS fs.FS, files []string, pattern string) sourceFunc {
+func fromExternalFile(ctx context.Context, files []string, pattern string) sourceFunc {
 	return func() (io.ReadCloser, string, error) {
 		for _, file := range files {
 			_, name := filepath.Split(file)
@@ -65,12 +65,12 @@ func fromExternalFile(ctx context.Context, libFS fs.FS, files []string, pattern 
 			if !match {
 				continue
 			}
-			f, err := libFS.Open(file)
+			f, err := os.Open(file)
 			if err != nil {
 				log.Warn(ctx, "Could not open cover art file", "file", file, err)
 				continue
 			}
-			return f, file, nil
+			return f, file, err
 		}
 		return nil, "", fmt.Errorf("pattern '%s' not matched by files %v", pattern, files)
 	}
@@ -83,43 +83,28 @@ var picTypeRegexes = []*regexp.Regexp{
 	regexp.MustCompile(`(?i).*cover.*`),
 }
 
-func fromTag(ctx context.Context, libFS fs.FS, relPath string) sourceFunc {
+func fromTag(ctx context.Context, path string) sourceFunc {
 	return func() (io.ReadCloser, string, error) {
-		if relPath == "" {
+		if path == "" {
 			return nil, "", nil
 		}
-		f, err := libFS.Open(relPath)
+		f, err := taglib.OpenReadOnly(path, taglib.WithReadStyle(taglib.ReadStyleFast))
 		if err != nil {
 			return nil, "", err
 		}
-		rs, ok := f.(io.ReadSeeker)
-		if !ok {
-			f.Close()
-			return nil, "", fmt.Errorf("FS file %s is not seekable; cannot read tags", relPath)
-		}
-		tf, err := taglib.OpenStream(rs,
-			taglib.WithReadStyle(taglib.ReadStyleFast),
-			taglib.WithFilename(relPath),
-		)
-		if err != nil {
-			f.Close()
-			return nil, "", err
-		}
-		// Close in LIFO order: tf first (it holds rs internally), then f.
 		defer f.Close()
-		defer tf.Close()
 
-		images := tf.Properties().Images
+		images := f.Properties().Images
 		if len(images) == 0 {
-			return nil, "", fmt.Errorf("no embedded image found in %s", relPath)
+			return nil, "", fmt.Errorf("no embedded image found in %s", path)
 		}
 
-		imageIndex := findBestImageIndex(ctx, images, relPath)
-		data, err := tf.Image(imageIndex)
+		imageIndex := findBestImageIndex(ctx, images, path)
+		data, err := f.Image(imageIndex)
 		if err != nil || len(data) == 0 {
-			return nil, "", fmt.Errorf("could not load embedded image from %s", relPath)
+			return nil, "", fmt.Errorf("could not load embedded image from %s", path)
 		}
-		return io.NopCloser(bytes.NewReader(data)), relPath, nil
+		return io.NopCloser(bytes.NewReader(data)), path, nil
 	}
 }
 
@@ -136,13 +121,6 @@ func findBestImageIndex(ctx context.Context, images []taglib.ImageDesc, path str
 	return 0
 }
 
-// fromFFmpegTag is intentionally absolute-path-based. ffmpeg is a subprocess
-// and cannot read from arbitrary fs.FS implementations; piping via stdin is a
-// non-trivial refactor with stream/seek implications.
-//
-// TODO(artwork-musicfs): when the storage backing the library is not local
-// (e.g. a future S3 backend, or FakeFS in tests), short-circuit this source
-// func to return (nil, "", nil) so callers fall through cleanly.
 func fromFFmpegTag(ctx context.Context, ffmpeg ffmpeg.FFmpeg, path string) sourceFunc {
 	return func() (io.ReadCloser, string, error) {
 		if path == "" {
@@ -210,7 +188,11 @@ func fromAlbumExternalSource(ctx context.Context, al model.Album, provider exter
 }
 
 func fromURL(ctx context.Context, imageUrl *url.URL) (io.ReadCloser, string, error) {
-	hc := http.Client{Timeout: 5 * time.Second}
+	// http.Client.Timeout covers body reads too, so a 5s cap was truncating
+	// larger Tidal covers mid-JPEG ("short Huffman data"). Use 30s for the
+	// full cycle — still a bound, just one realistic for ~1MB covers on a
+	// slow CDN.
+	hc := http.Client{Timeout: 30 * time.Second}
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, imageUrl.String(), nil)
 	req.Header.Set("User-Agent", consts.HTTPUserAgent)
 	resp, err := hc.Do(req) //nolint:gosec
@@ -222,4 +204,14 @@ func fromURL(ctx context.Context, imageUrl *url.URL) (io.ReadCloser, string, err
 		return nil, "", fmt.Errorf("error retrieving artwork from %s: %s", imageUrl, resp.Status)
 	}
 	return resp.Body, imageUrl.String(), nil
+}
+
+func fromTidalAlbum(ctx context.Context, al model.Album) sourceFunc {
+	return func() (io.ReadCloser, string, error) {
+		imageUrl, err := url.Parse(al.LargeImageUrl)
+		if err != nil {
+			return nil, "", fmt.Errorf("invalid tidal album image url: %w", err)
+		}
+		return fromURL(ctx, imageUrl)
+	}
 }

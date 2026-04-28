@@ -42,11 +42,10 @@ type Playlists interface {
 	RemoveImage(ctx context.Context, playlistID string) error
 
 	// Import
-	ImportFile(ctx context.Context, absolutePath string, sync bool) (*model.Playlist, error)
-	ImportFromFolder(ctx context.Context, folder *model.Folder, filename string) (*model.Playlist, error)
+	ImportFile(ctx context.Context, folder *model.Folder, filename string) (*model.Playlist, error)
 	ImportM3U(ctx context.Context, reader io.Reader) (*model.Playlist, error)
 
-	// REST adapters
+	// REST adapters (follows Share/Library pattern)
 	NewRepository(ctx context.Context) rest.Repository
 	TracksRepository(ctx context.Context, playlistId string, refreshSmartPlaylist bool) rest.Repository
 }

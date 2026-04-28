@@ -18,7 +18,6 @@ import (
 	"github.com/navidrome/navidrome/core/agents"
 	"github.com/navidrome/navidrome/core/lyrics"
 	"github.com/navidrome/navidrome/core/scrobbler"
-	"github.com/navidrome/navidrome/core/sonic"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/server/events"
@@ -239,32 +238,65 @@ func (m *Manager) PluginNames(capability string) []string {
 	return names
 }
 
+// LoadMediaAgent loads and returns a media agent plugin by name.
+// Returns false if the plugin is not found or doesn't have the MetadataAgent capability.
 func (m *Manager) LoadMediaAgent(name string) (agents.Interface, bool) {
-	return loadPlugin(m, name, CapabilityMetadataAgent, newMetadataAgent)
-}
-
-func (m *Manager) LoadScrobbler(name string) (scrobbler.Scrobbler, bool) {
-	return loadPlugin(m, name, CapabilityScrobbler, newScrobblerPlugin)
-}
-
-func (m *Manager) LoadLyricsProvider(name string) (lyrics.Lyrics, bool) {
-	return loadPlugin(m, name, CapabilityLyrics, newLyricsPlugin)
-}
-
-func (m *Manager) LoadSonicSimilarity(name string) (sonic.Provider, bool) {
-	return loadPlugin(m, name, CapabilitySonicSimilarity, newSonicSimilarityPlugin)
-}
-
-func loadPlugin[T any](m *Manager, name string, cap Capability, newAdapter func(*plugin) T) (T, bool) {
 	m.mu.RLock()
-	p, ok := m.plugins[name]
+	plugin, ok := m.plugins[name]
 	m.mu.RUnlock()
 
-	var zero T
-	if !ok || !hasCapability(p.capabilities, cap) {
-		return zero, false
+	if !ok || !hasCapability(plugin.capabilities, CapabilityMetadataAgent) {
+		return nil, false
 	}
-	return newAdapter(p), true
+
+	// Create a new metadata agent adapter for this plugin
+	return &MetadataAgent{
+		name:   plugin.name,
+		plugin: plugin,
+	}, true
+}
+
+// LoadScrobbler loads and returns a scrobbler plugin by name.
+// Returns false if the plugin is not found or doesn't have the Scrobbler capability.
+func (m *Manager) LoadScrobbler(name string) (scrobbler.Scrobbler, bool) {
+	m.mu.RLock()
+	plugin, ok := m.plugins[name]
+	m.mu.RUnlock()
+
+	if !ok || !hasCapability(plugin.capabilities, CapabilityScrobbler) {
+		return nil, false
+	}
+
+	// Build user ID map for fast lookups
+	userIDMap := make(map[string]struct{})
+	for _, id := range plugin.allowedUserIDs {
+		userIDMap[id] = struct{}{}
+	}
+
+	// Create a new scrobbler adapter for this plugin with user authorization config
+	return &ScrobblerPlugin{
+		name:           plugin.name,
+		plugin:         plugin,
+		allowedUserIDs: plugin.allowedUserIDs,
+		allUsers:       plugin.allUsers,
+		userIDMap:      userIDMap,
+	}, true
+}
+
+// LoadLyricsProvider loads and returns a lyrics provider plugin by name.
+func (m *Manager) LoadLyricsProvider(name string) (lyrics.Lyrics, bool) {
+	m.mu.RLock()
+	plugin, ok := m.plugins[name]
+	m.mu.RUnlock()
+
+	if !ok || !hasCapability(plugin.capabilities, CapabilityLyrics) {
+		return nil, false
+	}
+
+	return &LyricsPlugin{
+		name:   plugin.name,
+		plugin: plugin,
+	}, true
 }
 
 // PluginInfo contains basic information about a plugin for metrics/insights.

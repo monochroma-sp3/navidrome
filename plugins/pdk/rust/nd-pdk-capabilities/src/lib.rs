@@ -10,6 +10,5 @@ pub mod lyrics;
 pub mod metadata;
 pub mod scheduler;
 pub mod scrobbler;
-pub mod sonicsimilarity;
 pub mod taskworker;
 pub mod websocket;

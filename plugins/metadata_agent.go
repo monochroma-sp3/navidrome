@@ -6,7 +6,6 @@ import (
 
 	"github.com/navidrome/navidrome/core/agents"
 	"github.com/navidrome/navidrome/plugins/capabilities"
-	"github.com/navidrome/navidrome/utils/slice"
 )
 
 // CapabilityMetadataAgent indicates the plugin can provide artist/album metadata.
@@ -43,10 +42,6 @@ func init() {
 		FuncGetSimilarSongsByAlbum,
 		FuncGetSimilarSongsByArtist,
 	)
-}
-
-func newMetadataAgent(p *plugin) *MetadataAgent {
-	return &MetadataAgent{name: p.name, plugin: p}
 }
 
 // MetadataAgent is an adapter that wraps an Extism plugin and implements
@@ -227,24 +222,23 @@ func (a *MetadataAgent) GetSimilarSongsByArtist(ctx context.Context, id, name, m
 	return callSimilarSongsPluginFunction[capabilities.SimilarSongsByArtistRequest](ctx, a.plugin, FuncGetSimilarSongsByArtist, capabilities.SimilarSongsByArtistRequest{ID: id, Name: name, MBID: mbid, Count: int32(count)})
 }
 
-// songRefToAgentSong converts a single SongRef to agents.Song
-func songRefToAgentSong(s capabilities.SongRef) agents.Song {
-	return agents.Song{
-		ID:         s.ID,
-		Name:       s.Name,
-		MBID:       s.MBID,
-		ISRC:       s.ISRC,
-		Artist:     s.Artist,
-		ArtistMBID: s.ArtistMBID,
-		Album:      s.Album,
-		AlbumMBID:  s.AlbumMBID,
-		Duration:   uint32(s.Duration * 1000),
-	}
-}
-
 // songRefsToAgentSongs converts a slice of SongRef to agents.Song
 func songRefsToAgentSongs(refs []capabilities.SongRef) []agents.Song {
-	return slice.Map(refs, songRefToAgentSong)
+	songs := make([]agents.Song, len(refs))
+	for i, s := range refs {
+		songs[i] = agents.Song{
+			ID:         s.ID,
+			Name:       s.Name,
+			MBID:       s.MBID,
+			ISRC:       s.ISRC,
+			Artist:     s.Artist,
+			ArtistMBID: s.ArtistMBID,
+			Album:      s.Album,
+			AlbumMBID:  s.AlbumMBID,
+			Duration:   uint32(s.Duration * 1000),
+		}
+	}
+	return songs
 }
 
 // Verify interface implementations at compile time
